@@ -57,20 +57,22 @@ def filter_high_impact_events(events):
     return filtered
 
 
-def get_next_week_range():
-    """翌週の日曜日から土曜日までの日付を取得"""
+def get_current_week_range():
+    """今週の日曜日から土曜日までの日付を取得"""
     today = datetime.datetime.now()
-    days_until_sunday = (6 - today.weekday() + 7) % 7
-    if days_until_sunday == 0:
-        days_until_sunday = 7  # 本番用: 翌週（テスト時は0）
     
-    start_date = today + datetime.timedelta(days=days_until_sunday)
-    end_date = start_date + datetime.timedelta(days=6)
+    # 今週の日曜日を算出（0=月曜, 6=日曜）
+    days_since_sunday = (today.weekday() + 1) % 7
     
-    start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
-    end_date = end_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+    # 今週の日曜日
+    this_sunday = today - datetime.timedelta(days=days_since_sunday)
+    this_saturday = this_sunday + datetime.timedelta(days=6)
     
-    return start_date, end_date
+    # 時刻を設定
+    this_sunday = this_sunday.replace(hour=0, minute=0, second=0, microsecond=0)
+    this_saturday = this_saturday.replace(hour=23, minute=59, second=59, microsecond=999999)
+    
+    return this_sunday, this_saturday
 
 
 def filter_by_date_range(events, start_date, end_date):
@@ -253,8 +255,8 @@ async def main():
             # Forex Factoryからデータ取得
             all_events = fetch_forex_factory_calendar()
             
-            # 翌週の日付範囲を取得
-            start_date, end_date = get_next_week_range()
+            # 今週の日付範囲を取得
+            start_date, end_date = get_current_week_range()
             print(f"📅 対象期間: {start_date.strftime('%Y-%m-%d')} ~ {end_date.strftime('%Y-%m-%d')}")
             
             # 日付範囲でフィルタリング
