@@ -1,0 +1,302 @@
+#!/usr/bin/env python3
+"""
+経済指標Discord自動通知ツール
+
+Finnhub Economic Calendar APIから翌週の重要経済指標を取得し、
+Discord Webhookで通知するスクリプト。
+"""
+
+import os
+import sys
+from datetime import datetime, timedelta
+from typing import List, Dict, Optional
+import requests
+import pytz
+from dotenv import load_dotenv
+
+# .envファイルから環境変数を読み込み
+load_dotenv()
+
+
+# 定数定義
+FINNHUB_API_BASE = "https://finnhub.io/api/v1"
+DISCORD_CHAR_LIMIT = 2000
+COUNTRY_FLAGS = {
+    "US": "🇺🇸",
+    "JP": "🇯🇵",
+    "EU": "🇪🇺",
+    "GB": "🇬🇧",
+    "CN": "🇨🇳",
+    "DE": "🇩🇪",
+    "FR": "🇫🇷",
+    "IT": "🇮🇹",
+    "CA": "🇨🇦",
+    "AU": "🇦🇺",
+}
+
+
+def get_next_week_dates() -> tuple[str, str]:
+    """
+    翌週の日曜日から土曜日までの日付範囲を取得
+    
+    Returns:
+        (start_date, end_date): YYYY-MM-DD形式の日付タプル
+    """
+    # 日本時間でのタイムゾーン設定
+    jst = pytz.timezone('Asia/Tokyo')
+    now = datetime.now(jst)
+    
+    # 現在の曜日を取得 (0=月曜日, 6=日曜日)
+    current_weekday = now.weekday()
+    
+    # 次の日曜日までの日数を計算 (日曜日 = 6)
+    days_until_sunday = (6 - current_weekday) % 7
+    if days_until_sunday == 0:
+        days_until_sunday = 7  # 今日が日曜日の場合、来週の日曜日
+    
+    # 翌週の日曜日
+    next_sunday = now + timedelta(days=days_until_sunday)
+    # 翌週の土曜日
+    next_saturday = next_sunday + timedelta(days=6)
+    
+    start_date = next_sunday.strftime("%Y-%m-%d")
+    end_date = next_saturday.strftime("%Y-%m-%d")
+    
+    return start_date, end_date
+
+
+def fetch_economic_calendar(api_key: str, start_date: str, end_date: str) -> List[Dict]:
+    """
+    Finnhub APIから経済指標カレンダーを取得
+    
+    Args:
+        api_key: Finnhub APIキー
+        start_date: 開始日 (YYYY-MM-DD)
+        end_date: 終了日 (YYYY-MM-DD)
+    
+    Returns:
+        経済指標データのリスト
+    
+    Raises:
+        requests.RequestException: API呼び出しに失敗した場合
+    """
+    url = f"{FINNHUB_API_BASE}/calendar/economic"
+    params = {
+        "from": start_date,
+        "to": end_date,
+        "token": api_key
+    }
+    
+    print(f"📡 Finnhub APIにリクエスト中... (期間: {start_date} ~ {end_date})")
+    
+    response = requests.get(url, params=params, timeout=30)
+    response.raise_for_status()
+    
+    data = response.json()
+    
+    # econmicCalendarデータの取得
+    if "economicCalendar" in data:
+        events = data["economicCalendar"]
+        print(f"✅ {len(events)}件の経済指標を取得しました")
+        return events
+    else:
+        print("⚠️ 経済指標データが見つかりませんでした")
+        return []
+
+
+def filter_high_impact_events(events: List[Dict]) -> List[Dict]:
+    """
+    重要度が高い (impact == "high") 指標のみをフィルタリング
+    
+    Args:
+        events: 経済指標データのリスト
+    
+    Returns:
+        フィルタリングされた経済指標のリスト
+    """
+    filtered = [event for event in events if event.get("impact") == "high"]
+    print(f"🔍 高インパクト指標: {len(filtered)}件")
+    return filtered
+
+
+def format_value(value: Optional[float]) -> str:
+    """
+    数値をフォーマット（未定の場合は "-" を返す）
+    
+    Args:
+        value: 数値またはNone
+    
+    Returns:
+        フォーマットされた文字列
+    """
+    if value is None or value == "":
+        return "-"
+    return str(value)
+
+
+def convert_utc_to_jst(utc_timestamp: str) -> str:
+    """
+    UTC時刻を日本時間 (JST) に変換
+    
+    Args:
+        utc_timestamp: UTC時刻文字列 (ISO 8601形式)
+    
+    Returns:
+        日本時間の文字列 (YYYY/MM/DD HH:mm)
+    """
+    try:
+        # UTC時刻をパース
+        utc_time = datetime.fromisoformat(utc_timestamp.replace('Z', '+00:00'))
+        
+        # JSTに変換
+        jst = pytz.timezone('Asia/Tokyo')
+        jst_time = utc_time.astimezone(jst)
+        
+        return jst_time.strftime("%Y/%m/%d %H:%M")
+    except Exception as e:
+        print(f"⚠️ 時刻変換エラー: {utc_timestamp} - {e}")
+        return utc_timestamp
+
+
+def create_discord_message(events: List[Dict], start_date: str, end_date: str) -> List[str]:
+    """
+    Discord用のメッセージを生成（2000文字制限を考慮して分割）
+    
+    Args:
+        events: 経済指標データのリスト
+        start_date: 開始日
+        end_date: 終了日
+    
+    Returns:
+        メッセージ文字列のリスト
+    """
+    if not events:
+        return [f"📊 **翌週の重要経済指標** ({start_date} ~ {end_date})\n\n今週は重要経済指標の予定がありません。"]
+    
+    # ヘッダーメッセージ
+    header = f"📊 **翌週の重要経済指標** ({start_date} ~ {end_date})\n\n"
+    
+    messages = []
+    current_message = header
+    
+    # イベントを時系列順にソート
+    sorted_events = sorted(events, key=lambda x: x.get("time", ""))
+    
+    for event in sorted_events:
+        country = event.get("country", "XX")
+        flag = COUNTRY_FLAGS.get(country, "🏳️")
+        event_name = event.get("event", "不明な指標")
+        time_utc = event.get("time", "")
+        time_jst = convert_utc_to_jst(time_utc) if time_utc else "未定"
+        
+        previous = format_value(event.get("previous"))
+        estimate = format_value(event.get("estimate"))
+        
+        # イベント情報をフォーマット
+        event_text = (
+            f"**{flag} {country} - {time_jst}**\n"
+            f"指標: {event_name}\n"
+            f"前回: {previous} | 予想: {estimate}\n\n"
+        )
+        
+        # メッセージが2000文字を超える場合は分割
+        if len(current_message) + len(event_text) > DISCORD_CHAR_LIMIT:
+            messages.append(current_message.strip())
+            current_message = event_text
+        else:
+            current_message += event_text
+    
+    # 最後のメッセージを追加
+    if current_message.strip():
+        messages.append(current_message.strip())
+    
+    return messages
+
+
+def send_to_discord(webhook_url: str, messages: List[str]) -> None:
+    """
+    Discord Webhookにメッセージを送信
+    
+    Args:
+        webhook_url: Discord Webhook URL
+        messages: 送信するメッセージのリスト
+    
+    Raises:
+        requests.RequestException: Webhook呼び出しに失敗した場合
+    """
+    for i, message in enumerate(messages, 1):
+        print(f"📤 Discordにメッセージ送信中... ({i}/{len(messages)})")
+        
+        payload = {"content": message}
+        response = requests.post(webhook_url, json=payload, timeout=10)
+        response.raise_for_status()
+        
+        print(f"✅ メッセージ {i}/{len(messages)} 送信完了")
+
+
+def main():
+    """メイン処理"""
+    print("=" * 60)
+    print("経済指標Discord自動通知ツール")
+    print("=" * 60)
+    
+    # 環境変数から認証情報を取得
+    api_key = os.getenv("FINNHUB_API_KEY")
+    webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
+    
+    if not api_key:
+        print("❌ エラー: FINNHUB_API_KEY が設定されていません")
+        sys.exit(1)
+    
+    if not webhook_url:
+        print("❌ エラー: DISCORD_WEBHOOK_URL が設定されていません")
+        sys.exit(1)
+    
+    try:
+        # 翌週の日付範囲を取得
+        start_date, end_date = get_next_week_dates()
+        print(f"📅 対象期間: {start_date} ~ {end_date}")
+        
+        # Finnhub APIから経済指標を取得
+        events = fetch_economic_calendar(api_key, start_date, end_date)
+        
+        # 高インパクト指標のみをフィルタリング
+        high_impact_events = filter_high_impact_events(events)
+        
+        # Discordメッセージを生成
+        messages = create_discord_message(high_impact_events, start_date, end_date)
+        
+        # Discordに送信
+        send_to_discord(webhook_url, messages)
+        
+        print("=" * 60)
+        print("✅ 処理が正常に完了しました")
+        print("=" * 60)
+        
+    except requests.RequestException as e:
+        error_message = f"❌ API呼び出しエラー: {str(e)}"
+        print(error_message)
+        
+        # エラーもDiscordに通知
+        try:
+            send_to_discord(webhook_url, [error_message])
+        except:
+            pass
+        
+        sys.exit(1)
+    
+    except Exception as e:
+        error_message = f"❌ 予期せぬエラー: {str(e)}"
+        print(error_message)
+        
+        # エラーもDiscordに通知
+        try:
+            send_to_discord(webhook_url, [error_message])
+        except:
+            pass
+        
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
