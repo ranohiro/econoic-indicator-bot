@@ -1,10 +1,11 @@
 name: Economic Calendar Notification
 
 on:
-  # 毎週日曜日 21:00 UTC (翌日月曜 6:00 JST) に実行 - 今週のカレンダー送信
+  # 毎週日曜 9:00 UTC (18:00 JST) に実行 - 今週のカレンダー初回送信
   # 毎日 21:00 UTC (翌日 6:00 JST) に実行 - 実績データ更新
   schedule:
-    - cron: '0 21 * * *'  # 毎日 6:00 JST（日曜に初回、以降は更新）
+    - cron: '0 9 * * 0'   # 日曜 18:00 JST（初回送信）
+    - cron: '0 21 * * 0-6' # 毎日 6:00 JST（更新）
   
   # 手動実行も可能
   workflow_dispatch:
