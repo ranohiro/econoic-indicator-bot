@@ -21,6 +21,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 全履歴を取得
+      
+      - name: Pull latest changes
+        run: |
+          git pull origin main
       
       - name: Set up Python
         uses: actions/setup-python@v5
