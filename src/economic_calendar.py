@@ -20,7 +20,6 @@ load_dotenv()
 
 # 定数定義
 DISCORD_CHAR_LIMIT = 2000
-MESSAGE_STATE_FILE = "message_state.json"
 
 # 通貨/国コードを旗に変換
 COUNTRY_FLAGS = {
@@ -148,54 +147,37 @@ def create_discord_message(events, start_date, end_date):
     return messages
 
 
-def load_message_state():
-    """メッセージ状態をファイルから読み込み"""
-    if os.path.exists(MESSAGE_STATE_FILE):
-        try:
-            with open(MESSAGE_STATE_FILE, 'r') as f:
-                return json.load(f)
-        except:
-            return {}
-    return {}
-
-
-def save_message_state(week_start, message_id):
-    """メッセージ状態をファイルに保存"""
-    state = {
-        "current_week": week_start,
-        "message_id": str(message_id)
-    }
-    with open(MESSAGE_STATE_FILE, 'w') as f:
-        json.dump(state, f, indent=2)
-    print(f"💾 メッセージ状態を保存: {week_start}")
-
-
-async def send_calendar_message(channel, events, start_date, end_date):
+async def send_calendar_message(channel, events, start_date, end_date, client):
     """カレンダーメッセージを送信し、必要に応じて古いメッセージを削除"""
     week_start = start_date.strftime('%Y-%m-%d')
-    state = load_message_state()
+    week_end = end_date.strftime('%Y-%m-%d')
+    week_identifier = f"{week_start} 〜 {week_end}"
     
-    # 前回のメッセージ確認
-    should_delete_old = False
-    if state.get('current_week') and state.get('message_id'):
-        # 同じ週なら古いメッセージを削除
-        if state['current_week'] == week_start:
-            should_delete_old = True
-            old_message_id = int(state['message_id'])
-            print(f"🗑️  同じ週のため、古いメッセージ削除: {old_message_id}")
-        else:
-            print(f"📌 新しい週のため、前週メッセージは保持")
+    # Botが送信した同じ週のメッセージを検索・削除
+    print(f"🔍 過去のメッセージを検索中（対象週: {week_identifier}）...")
+    deleted_count = 0
     
-    # 古いメッセージを削除
-    if should_delete_old:
-        try:
-            old_message = await channel.fetch_message(old_message_id)
-            await old_message.delete()
-            print(f"✅ 古いメッセージを削除")
-        except discord.NotFound:
-            print(f"⚠️  古いメッセージが見つかりません")
-        except Exception as e:
-            print(f"❌ メッセージ削除エラー: {e}")
+    try:
+        async for message in channel.history(limit=100):
+            # 自分（Bot）が送信したメッセージのみ対象
+            if message.author.id == client.user.id:
+                # メッセージ内容に同じ週の範囲が含まれているか確認
+                if week_identifier in message.content:
+                    try:
+                        await message.delete()
+                        deleted_count += 1
+                        print(f"🗑️  古いメッセージを削除: ID {message.id}")
+                    except discord.NotFound:
+                        print(f"⚠️  メッセージが既に削除されています: ID {message.id}")
+                    except Exception as e:
+                        print(f"❌ メッセージ削除エラー: {e}")
+    except Exception as e:
+        print(f"❌ メッセージ検索エラー: {e}")
+    
+    if deleted_count > 0:
+        print(f"✅ {deleted_count}件の古いメッセージを削除しました")
+    else:
+        print(f"📌 削除対象のメッセージはありませんでした（新規週または初回実行）")
     
     # 新しいメッセージを送信
     messages = create_discord_message(events, start_date, end_date)
@@ -203,8 +185,7 @@ async def send_calendar_message(channel, events, start_date, end_date):
     sent_message = None
     for i, msg_content in enumerate(messages, 1):
         sent_message = await channel.send(msg_content)
-        if i == 1:  # 最初のメッセージIDのみ保存
-            save_message_state(week_start, sent_message.id)
+        print(f"📤 メッセージ {i}/{len(messages)} を送信しました")
     
     return sent_message
 
@@ -266,7 +247,7 @@ async def main():
             high_impact_events = filter_high_impact_events(week_events)
             
             # メッセージ送信（古いメッセージ管理含む）
-            await send_calendar_message(channel, high_impact_events, start_date, end_date)
+            await send_calendar_message(channel, high_impact_events, start_date, end_date, client)
             
             print("=" * 60)
             print("✅ 処理が正常に完了しました")
