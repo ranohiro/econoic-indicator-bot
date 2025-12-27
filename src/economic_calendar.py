@@ -187,11 +187,11 @@ def create_discord_message(events, start_date, end_date):
         
         # 実績データがあれば表示
         if actual:
-            line = f"🕒 `{time_display}` {flag} **{event_name}**\n"
-            line += f"   ┗ 結果: `{actual}` / 予: `{forecast}` / 前: `{previous}`\n\n"
+            line = f"🕒 {time_display} {flag} **{event_name}**\n"
+            line += f"   ┗ 結果: {actual} / 予: {forecast} / 前: {previous}\n\n"
         else:
-            line = f"🕒 `{time_display}` {flag} **{event_name}**\n"
-            line += f"   ┗ 予: `{forecast}` / 前: `{previous}`\n\n"
+            line = f"🕒 {time_display} {flag} **{event_name}**\n"
+            line += f"   ┗ 予: {forecast} / 前: {previous}\n\n"
         
         if len(current_message) + len(line) > 1900:
             messages.append(current_message.strip())
