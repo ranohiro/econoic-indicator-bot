@@ -49,10 +49,68 @@ def fetch_forex_factory_calendar():
         raise
 
 
-def filter_high_impact_events(events):
-    """重要度が 'High' の指標のみをフィルタリング"""
-    filtered = [e for e in events if e.get('impact') == 'High']
-    print(f"🔍 高インパクト指標: {len(filtered)}件")
+def filter_important_events(events):
+    """
+    投資に重要な経済指標のみをフィルタリング
+    - 対象国: 米国（USD）、日本（JPY）、中国（CNY）
+    - High impact: すべて含める
+    - Medium impact: 重要指標のキーワードに該当するもののみ
+    """
+    TARGET_COUNTRIES = ['USD', 'JPY', 'CNY']
+    
+    # Medium用の重要キーワード（ユーザーのウォッチリストより）
+    IMPORTANT_KEYWORDS = [
+        # 米国
+        'CPI', 'PCE', 'PPI',  # 物価
+        'Non-Farm', 'Nonfarm', 'Employment Change', 'Unemployment', 'JOLTS',  # 雇用
+        'ISM Manufacturing', 'ISM Services', 'PMI',  # 景況感
+        'Retail Sales', 'Consumer Sentiment', 'Consumer Confidence',  # 消費
+        'Federal Funds', 'FOMC',  # 政策
+        # 日本
+        'Tokyo CPI', 'Core CPI', 'National CPI',  # 物価
+        'Tankan',  # 景況感
+        'BOJ', 'Policy Rate', 'Monetary Policy',  # 政策
+        'Trade Balance',  # 貿易
+        # 中国
+        'Manufacturing PMI',  # 景況感
+    ]
+    
+    filtered = []
+    
+    for event in events:
+        country = event.get('country')
+        impact = event.get('impact')
+        title = event.get('title', '')
+        
+        # 対象国以外はスキップ
+        if country not in TARGET_COUNTRIES:
+            continue
+        
+        # High は全て含める
+        if impact == 'High':
+            filtered.append(event)
+            continue
+        
+        # Medium は重要キーワードに該当する場合のみ
+        if impact == 'Medium':
+            for keyword in IMPORTANT_KEYWORDS:
+                if keyword.lower() in title.lower():
+                    filtered.append(event)
+                    break
+    
+    # 国別・重要度別の統計
+    stats = {}
+    for country in TARGET_COUNTRIES:
+        country_events = [e for e in filtered if e.get('country') == country]
+        high = len([e for e in country_events if e.get('impact') == 'High'])
+        medium = len([e for e in country_events if e.get('impact') == 'Medium'])
+        stats[country] = {'total': len(country_events), 'high': high, 'medium': medium}
+    
+    print(f"🔍 重要経済指標: {len(filtered)}件（厳選フィルター）")
+    for country, data in stats.items():
+        if data['total'] > 0:
+            print(f"   {country}: {data['total']}件 (High: {data['high']}, Medium: {data['medium']})")
+    
     return filtered
 
 
@@ -243,11 +301,11 @@ async def main():
             # 日付範囲でフィルタリング
             week_events = filter_by_date_range(all_events, start_date, end_date)
             
-            # 重要度が高い指標のみ抽出
-            high_impact_events = filter_high_impact_events(week_events)
+            # 重要な経済指標のみ抽出（USD/JPY/CNY の High/Medium）
+            important_events = filter_important_events(week_events)
             
             # メッセージ送信（古いメッセージ管理含む）
-            await send_calendar_message(channel, high_impact_events, start_date, end_date, client)
+            await send_calendar_message(channel, important_events, start_date, end_date, client)
             
             print("=" * 60)
             print("✅ 処理が正常に完了しました")
